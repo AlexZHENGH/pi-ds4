@@ -1,11 +1,22 @@
 # pi-ds4
 
 Pi provider extension for running [antirez/ds4](https://github.com/antirez/ds4)
-as a local DeepSeek V4 Flash model.
+as a local DeepSeek V4 Flash model.  The goal here is to see how good the UX
+and behavior can be around local models.
 
 The extension registers the `ds4/deepseek-v4-flash` model, starts `ds4-server`
 on demand, downloads/builds the runtime if needed, keeps a per-pi-process lease,
 and stops the server via a bundled watchdog when no clients are left.
+
+## Requirements and Behavior
+
+You will need a mac with at least 128GB of RAM.  The way this is set up right now
+is that it will install the 2-bit quantized model if you have 128GB of RAM and
+it will pick the 4-bit quantized model if you have 256MB or more.
+
+If you are signed into huggingface then your token is used for faster downloads.
+The server is compiled/started and models are downloaded automatically on first
+use.
 
 ## Install
 
