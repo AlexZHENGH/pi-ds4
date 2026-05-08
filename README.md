@@ -31,7 +31,10 @@ For local development from this checkout, pass the path to an existing ds4 serve
 ```
 
 If `~/.pi/ds4/support` already exists and points elsewhere, use `--force` to
-move it aside and install a symlink to the checkout you passed.
+move it aside and install a symlink to the checkout you passed. Any existing
+`gguf/*.gguf` model files (and resumable `.gguf.part` downloads) are preserved
+into the new checkout first, using APFS clone-on-write copies on macOS when
+available.
 
 Then restart pi or run `/reload`.
 

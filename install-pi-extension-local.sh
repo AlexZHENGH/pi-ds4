@@ -5,6 +5,66 @@ usage() {
     echo "usage: $0 [--force] /path/to/ds4-server-checkout" >&2
 }
 
+copy_file_cow() {
+    src=$1
+    dst=$2
+    tmp="$dst.tmp.$$"
+
+    rm -f "$tmp"
+    if [ "$(uname -s)" = "Darwin" ] && cp -c -p "$src" "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$dst"
+        return 0
+    fi
+
+    rm -f "$tmp"
+    cp -p "$src" "$tmp"
+    mv -f "$tmp" "$dst"
+}
+
+copy_existing_models() {
+    src_root=$1
+    dst_root=$2
+    src_gguf="$src_root/gguf"
+    dst_gguf="$dst_root/gguf"
+    copied=0
+    skipped=0
+
+    if [ ! -d "$src_gguf" ]; then
+        return 0
+    fi
+
+    mkdir -p "$dst_gguf"
+
+    for src in "$src_gguf"/*.gguf "$src_gguf"/*.gguf.part; do
+        [ -f "$src" ] || continue
+        name=$(basename -- "$src")
+        dst="$dst_gguf/$name"
+        if [ -e "$dst" ] || [ -L "$dst" ]; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+        echo "Copying existing model with APFS clone/copy fallback:"
+        echo "  $src"
+        echo "  -> $dst"
+        copy_file_cow "$src" "$dst"
+        copied=$((copied + 1))
+    done
+
+    if [ ! -e "$dst_root/ds4flash.gguf" ] && [ ! -L "$dst_root/ds4flash.gguf" ]; then
+        if [ -L "$src_root/ds4flash.gguf" ]; then
+            link_target=$(readlink "$src_root/ds4flash.gguf")
+            ln -s "$link_target" "$dst_root/ds4flash.gguf"
+        elif [ -f "$src_root/ds4flash.gguf" ]; then
+            copy_file_cow "$src_root/ds4flash.gguf" "$dst_root/ds4flash.gguf"
+            copied=$((copied + 1))
+        fi
+    fi
+
+    if [ "$copied" -gt 0 ] || [ "$skipped" -gt 0 ]; then
+        echo "Preserved existing model files from old support checkout: copied $copied, skipped $skipped."
+    fi
+}
+
 FORCE=0
 if [ "${1:-}" = "--force" ]; then
     FORCE=1
@@ -56,6 +116,9 @@ if [ -L "$SUPPORT_LINK" ]; then
     if [ "$current" = "$DS4_CHECKOUT" ]; then
         installed_support=1
     else
+        if [ "$FORCE" -eq 1 ]; then
+            copy_existing_models "$SUPPORT_LINK" "$DS4_CHECKOUT"
+        fi
         rm -f "$SUPPORT_LINK"
         ln -s "$DS4_CHECKOUT" "$SUPPORT_LINK"
         installed_support=1
@@ -65,6 +128,7 @@ elif [ -e "$SUPPORT_LINK" ]; then
     if [ "$current" = "$DS4_CHECKOUT" ]; then
         installed_support=1
     elif [ "$FORCE" -eq 1 ]; then
+        copy_existing_models "$SUPPORT_LINK" "$DS4_CHECKOUT"
         backup="$SUPPORT_LINK.backup.$(date +%Y%m%d%H%M%S)"
         mv "$SUPPORT_LINK" "$backup"
         ln -s "$DS4_CHECKOUT" "$SUPPORT_LINK"
