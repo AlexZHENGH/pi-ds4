@@ -4,15 +4,17 @@ Pi provider extension for running [antirez/ds4](https://github.com/antirez/ds4)
 as a local DeepSeek V4 Flash model.  The goal here is to see how good the UX
 and behavior can be around local models.
 
-The extension registers the `ds4/deepseek-v4-flash` model, starts `ds4-server`
+The extension registers `ds4/deepseek-v4-flash` and
+`ds4/deepseek-v4-flash-q2-imatrix` as models for `/model`, starts `ds4-server`
 on demand, downloads/builds the runtime if needed, keeps a per-pi-process lease,
 and stops the server via a bundled watchdog when no clients are left.
 
 ## Requirements and Behavior
 
-You will need a mac with at least 128GB of RAM.  The way this is set up right now
-is that it will install the 2-bit quantized model if you have 128GB of RAM and
-it will pick the 4-bit quantized model if you have 256GB or more.
+You will need a mac with at least 128GB of RAM.  The default
+`ds4/deepseek-v4-flash` model installs the 2-bit quantized model if you have
+128GB of RAM and picks the 4-bit quantized model if you have 256GB or more.
+Select `ds4/deepseek-v4-flash-q2-imatrix` to use the imatrix-tuned q2 model.
 
 If you are signed into huggingface then your token is used for faster downloads.
 The server is compiled/started and models are downloaded automatically on first
@@ -43,7 +45,8 @@ Then restart pi or run `/reload`.
 Runtime state is kept under `~/.pi/ds4`:
 
 - `support/` — shallow checkout of `https://github.com/antirez/ds4` (`main` by default)
-- `kv/` — on-disk KV cache
+- `kv/` — on-disk KV cache for the default model choice
+- `kv-q2-imatrix/` — on-disk KV cache for the q2-imatrix model choice
 - `clients/` — active pi process leases
 - `log` — build/download/server/watchdog log
 
@@ -57,7 +60,8 @@ Environment overrides:
 - `DS4_SUPPORT_REPO`: runtime repo URL (default `https://github.com/antirez/ds4`)
 - `DS4_SUPPORT_BRANCH`: runtime branch (default `main`)
 - `DS4_RUNTIME_DIR`: use an existing ds4 checkout instead of `~/.pi/ds4/support`
-- `DS4_MODEL_QUANT`: force `q2` or `q4` (otherwise picked from system memory)
+- `DS4_MODEL_QUANT`: force `q2`, `q2-imatrix`, or `q4` for the default model
+  choice (otherwise picked from system memory)
 - `DS4_READY_TIMEOUT_MS`: server startup timeout
 - `DS4_SERVER_BINARY`: custom `ds4-server` binary path
 
