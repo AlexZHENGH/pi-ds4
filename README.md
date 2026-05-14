@@ -74,10 +74,12 @@ variables win over the settings file.
 - `DS4_WATCHDOG_SCRIPT`: custom watchdog script path
 - `DS4_API_KEY`: provider API key/token sent by Pi (default `dsv4-local`)
 
-Example:
+See `settings.example.json` for a complete example with a JSON schema reference.
+A minimal `~/.pi/ds4/settings.json` can look like this:
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/mitsuhiko/pi-ds4/main/settings.schema.json",
   "protocol": "openai-responses",
   "modelQuant": "q2-imatrix",
   "readyTimeoutMs": 900000
