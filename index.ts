@@ -1258,6 +1258,14 @@ async function stopServerIfUnused(): Promise<void> {
 	await removeOwnLease();
 }
 
+function registerDs4Skill(pi: ExtensionAPI): void {
+	pi.on("resources_discover", () => {
+		return {
+			skillPaths: [join(EXTENSION_DIR, "pi-ds4-config", "SKILL.md")],
+		};
+	});
+}
+
 function registerDs4Command(pi: ExtensionAPI): void {
 	pi.registerCommand("ds4", {
 		description: "Show the live ds4-server log",
@@ -1348,6 +1356,7 @@ export default function (pi: ExtensionAPI) {
 
 	registerDs4Provider(pi);
 	registerDs4Command(pi);
+	registerDs4Skill(pi);
 
 	pi.on("before_provider_request", async (_event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER_ID) return;
