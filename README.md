@@ -48,6 +48,7 @@ Runtime state is kept under `~/.pi/ds4`:
 - `kv/` — on-disk KV cache for the default model choice
 - `kv-q2-imatrix/` — on-disk KV cache for the q2-imatrix model choice
 - `clients/` — active pi process leases
+- `settings.json` — optional extension configuration overrides
 - `log` — build/download/server/watchdog log
 
 The watchdog is bundled in this package (`ds4-watchdog.sh`), not expected to
@@ -55,8 +56,14 @@ exist in the ds4 runtime checkout.
 
 ## Configuration
 
-Environment overrides:
+Environment overrides can also be placed in `~/.pi/ds4/settings.json`.  In the
+JSON file, use the env var name (for example `"DS4_READY_TIMEOUT_MS"`), the
+camel-case key without `DS4_` (for example `"readyTimeoutMs"`), or the lower
+snake-case key without `DS4_` (for example `"ready_timeout_ms"`). Environment
+variables win over the settings file.
 
+- `DS4_PROTOCOL`: Pi wire protocol. Supported values are `openai` (default,
+  OpenAI Chat Completions), `openai-responses`, and `anthropic`.
 - `DS4_SUPPORT_REPO`: runtime repo URL (default `https://github.com/antirez/ds4`)
 - `DS4_SUPPORT_BRANCH`: runtime branch (default `main`)
 - `DS4_RUNTIME_DIR`: use an existing ds4 checkout instead of `~/.pi/ds4/support`
@@ -64,5 +71,17 @@ Environment overrides:
   choice (otherwise picked from system memory)
 - `DS4_READY_TIMEOUT_MS`: server startup timeout
 - `DS4_SERVER_BINARY`: custom `ds4-server` binary path
+- `DS4_WATCHDOG_SCRIPT`: custom watchdog script path
+- `DS4_API_KEY`: provider API key/token sent by Pi (default `dsv4-local`)
+
+Example:
+
+```json
+{
+  "protocol": "openai-responses",
+  "modelQuant": "q2-imatrix",
+  "readyTimeoutMs": 900000
+}
+```
 
 Use `/ds4` inside pi to show the live ds4 log.
