@@ -64,5 +64,11 @@ Environment overrides:
   choice (otherwise picked from system memory)
 - `DS4_READY_TIMEOUT_MS`: server startup timeout
 - `DS4_SERVER_BINARY`: custom `ds4-server` binary path
+- `DS4_CTX`: `ds4-server` context window (default `100000`); also advertised
+  to the coding agent as the model's `contextWindow` so prompt truncation
+  matches the server limit
+- `DS4_KV_DISK_MB`: on-disk KV cache cap in MB passed to `--kv-disk-space-mb`
+  (default `8192`); raise this when increasing `DS4_CTX` to keep
+  cross-session cache hit rate reasonable
 
 Use `/ds4` inside pi to show the live ds4 log.

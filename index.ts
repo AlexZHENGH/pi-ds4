@@ -42,7 +42,20 @@ const SUPPORT_BRANCH = process.env.DS4_SUPPORT_BRANCH ?? "main";
 
 const BASE_URL = "http://127.0.0.1:8000";
 const API_BASE_URL = `${BASE_URL}/v1`;
-const SERVER_BASE_ARGS = ["--ctx", "100000", "--kv-disk-space-mb", "8192"];
+
+function parsePositiveIntEnv(name: string, defaultValue: number): number {
+	const raw = process.env[name];
+	if (raw === undefined || raw === "") return defaultValue;
+	const parsed = Number(raw);
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		throw new Error(`Invalid ${name}=${raw}; expected a positive integer`);
+	}
+	return parsed;
+}
+
+const SERVER_CTX = parsePositiveIntEnv("DS4_CTX", 100_000);
+const SERVER_KV_DISK_MB = parsePositiveIntEnv("DS4_KV_DISK_MB", 8192);
+const SERVER_BASE_ARGS = ["--ctx", String(SERVER_CTX), "--kv-disk-space-mb", String(SERVER_KV_DISK_MB)];
 
 const HEARTBEAT_MS = 10_000;
 const LEASE_TTL_MS = 45_000;
@@ -1234,7 +1247,7 @@ function ds4Model(id: string, name: string) {
 			xhigh: "xhigh",
 		},
 		input: ["text"],
-		contextWindow: 100000,
+		contextWindow: SERVER_CTX,
 		maxTokens: 384000,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	};
