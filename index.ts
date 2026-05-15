@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { closeSync, constants, openSync, writeSync } from "node:fs";
+import { closeSync, constants, openSync, readFileSync, writeSync } from "node:fs";
 import {
 	access,
 	appendFile,
@@ -29,6 +29,7 @@ const Q2_IMATRIX_MODEL_ID = "deepseek-v4-flash-q2-imatrix";
 const MANAGED_BY = "pi-sd4-provider";
 
 const DS4_DIR = join(homedir(), ".pi", "ds4");
+const SETTINGS_FILE = join(DS4_DIR, "settings.json");
 const KV_DIR = join(DS4_DIR, "kv");
 const SUPPORT_DIR = join(DS4_DIR, "support");
 const CLIENT_DIR = join(DS4_DIR, "clients");
@@ -37,24 +38,82 @@ const STATE_FILE = join(DS4_DIR, "server.json");
 const LOG_FILE = join(DS4_DIR, "log");
 const LEASE_FILE = join(CLIENT_DIR, `${process.pid}.json`);
 
-const SUPPORT_REPO = process.env.DS4_SUPPORT_REPO ?? "https://github.com/antirez/ds4";
-const SUPPORT_BRANCH = process.env.DS4_SUPPORT_BRANCH ?? "main";
+type Ds4Settings = Record<string, unknown>;
+type ProviderProtocol = "openai-completions" | "openai-responses" | "anthropic-messages";
+
+function settingsKeyForEnv(envName: string): string {
+	const withoutPrefix = envName.replace(/^DS4_/, "").toLowerCase();
+	return withoutPrefix.replace(/_([a-z])/g, (_match, char: string) => char.toUpperCase());
+}
+
+function readSettingsSync(): Ds4Settings {
+	try {
+		const parsed = JSON.parse(readFileSync(SETTINGS_FILE, "utf8"));
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Ds4Settings;
+		throw new Error("settings root must be a JSON object");
+	} catch (error: any) {
+		if (error?.code === "ENOENT") return {};
+		throw new Error(`Failed to read ${SETTINGS_FILE}: ${describeError(error)}`);
+	}
+}
+
+const DS4_SETTINGS = readSettingsSync();
+
+function settingValue(envName: string): unknown {
+	if (process.env[envName] !== undefined) return process.env[envName];
+	const snakeKey = envName.replace(/^DS4_/, "").toLowerCase();
+	const keys = [envName, settingsKeyForEnv(envName), envName.toLowerCase(), snakeKey];
+	for (const key of keys) {
+		if (Object.prototype.hasOwnProperty.call(DS4_SETTINGS, key)) return DS4_SETTINGS[key];
+	}
+	return undefined;
+}
+
+function configString(envName: string, defaultValue?: string): string | undefined {
+	const value = settingValue(envName);
+	if (value === undefined || value === null) return defaultValue;
+	if (typeof value === "string") return value;
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	throw new Error(`${envName} must be a string in the environment or ${SETTINGS_FILE}`);
+}
+
+function configNumber(envName: string, defaultValue: number): number {
+	const value = settingValue(envName);
+	if (value === undefined || value === null || value === "") return defaultValue;
+	const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+	if (!Number.isFinite(number)) throw new Error(`${envName} must be a finite number in the environment or ${SETTINGS_FILE}`);
+	return number;
+}
+
+function selectedProtocol(): ProviderProtocol {
+	const raw = configString("DS4_PROTOCOL", "openai")?.toLowerCase();
+	switch (raw) {
+		case "openai":
+		case "openai-completions":
+		case "chat":
+		case "chat-completions":
+			return "openai-completions";
+		case "responses":
+		case "openai-responses":
+			return "openai-responses";
+		case "anthropic":
+		case "anthropic-messages":
+		case "messages":
+			return "anthropic-messages";
+		default:
+			throw new Error(`Invalid DS4_PROTOCOL=${raw}; expected openai, openai-responses, or anthropic`);
+	}
+}
+
+const SUPPORT_REPO = configString("DS4_SUPPORT_REPO", "https://github.com/antirez/ds4")!;
+const SUPPORT_BRANCH = configString("DS4_SUPPORT_BRANCH", "main")!;
 
 const BASE_URL = "http://127.0.0.1:8000";
 const API_BASE_URL = `${BASE_URL}/v1`;
-
-function parsePositiveIntEnv(name: string, defaultValue: number): number {
-	const raw = process.env[name];
-	if (raw === undefined || raw === "") return defaultValue;
-	const parsed = Number(raw);
-	if (!Number.isInteger(parsed) || parsed <= 0) {
-		throw new Error(`Invalid ${name}=${raw}; expected a positive integer`);
-	}
-	return parsed;
-}
-
-const SERVER_CTX = parsePositiveIntEnv("DS4_CTX", 100_000);
-const SERVER_KV_DISK_MB = parsePositiveIntEnv("DS4_KV_DISK_MB", 8192);
+const PROVIDER_API = selectedProtocol();
+const PROVIDER_BASE_URL = PROVIDER_API === "anthropic-messages" ? BASE_URL : API_BASE_URL;
+const SERVER_CTX = configNumber("DS4_CTX", 100_000);
+const SERVER_KV_DISK_MB = configNumber("DS4_KV_DISK_MB", 8192);
 const SERVER_BASE_ARGS = ["--ctx", String(SERVER_CTX), "--kv-disk-space-mb", String(SERVER_KV_DISK_MB)];
 
 const HEARTBEAT_MS = 10_000;
@@ -62,7 +121,7 @@ const LEASE_TTL_MS = 45_000;
 const LOCK_STALE_MS = 60_000;
 const LOCK_TIMEOUT_MS = 30_000;
 const STARTUP_LOCK_TIMEOUT_MS = 24 * 60 * 60_000;
-const READY_TIMEOUT_MS = Number(process.env.DS4_READY_TIMEOUT_MS ?? 10 * 60_000);
+const READY_TIMEOUT_MS = configNumber("DS4_READY_TIMEOUT_MS", 10 * 60_000);
 const HTTP_CHECK_TIMEOUT_MS = 1_500;
 const SHUTDOWN_GRACE_MS = 60_000;
 const LOG_TAIL_BYTES = 256 * 1024;
@@ -111,8 +170,9 @@ type LogTheme = { fg: (color: string, text: string) => string };
 type Component = { render(width: number): string[]; handleInput?(data: string): void; invalidate(): void };
 
 const WATCHDOG_SCRIPT_NAME = "ds4-watchdog.sh";
-const WATCHDOG_SCRIPT = process.env.DS4_WATCHDOG_SCRIPT
-	? resolve(process.env.DS4_WATCHDOG_SCRIPT)
+const WATCHDOG_SCRIPT_CONFIG = configString("DS4_WATCHDOG_SCRIPT");
+const WATCHDOG_SCRIPT = WATCHDOG_SCRIPT_CONFIG
+	? resolve(WATCHDOG_SCRIPT_CONFIG)
 	: join(EXTENSION_DIR, WATCHDOG_SCRIPT_NAME);
 
 let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -188,7 +248,7 @@ function truncateText(value: string, width: number, ellipsis = "", pad = false):
 }
 
 function selectedDefaultModelQuant(): ModelQuant {
-	const forced = process.env.DS4_MODEL_QUANT?.toLowerCase();
+	const forced = configString("DS4_MODEL_QUANT")?.toLowerCase();
 	if (forced === "q2" || forced === "q2-imatrix" || forced === "q4") return forced;
 	if (forced) throw new Error(`Invalid DS4_MODEL_QUANT=${forced}; expected q2, q2-imatrix or q4`);
 
@@ -806,7 +866,7 @@ async function ensureSupportCheckout(onStatus?: StatusCallback): Promise<string>
 async function resolveRuntimeDirLocked(onStatus?: StatusCallback): Promise<string> {
 	if (resolvedRuntimeDir) return resolvedRuntimeDir;
 
-	const forced = process.env.DS4_RUNTIME_DIR;
+	const forced = configString("DS4_RUNTIME_DIR");
 	if (forced) {
 		const dir = resolve(forced);
 		if (!(await isDs4Checkout(dir))) throw new Error(`DS4_RUNTIME_DIR=${dir} is not a ds4 checkout`);
@@ -1069,7 +1129,7 @@ async function waitForServerReady(modelQuant: ModelQuant, onStatus?: StatusCallb
 }
 
 async function startServerLocked(runtimeDir: string, modelQuant: ModelQuant, modelPath: string): Promise<void> {
-	const binary = process.env.DS4_SERVER_BINARY ?? join(runtimeDir, "ds4-server");
+	const binary = configString("DS4_SERVER_BINARY") ?? join(runtimeDir, "ds4-server");
 	try {
 		await access(binary, constants.X_OK);
 	} catch {
@@ -1200,6 +1260,14 @@ async function stopServerIfUnused(): Promise<void> {
 	await removeOwnLease();
 }
 
+function registerDs4Skill(pi: ExtensionAPI): void {
+	pi.on("resources_discover", () => {
+		return {
+			skillPaths: [join(EXTENSION_DIR, "pi-ds4-config", "SKILL.md")],
+		};
+	});
+}
+
 function registerDs4Command(pi: ExtensionAPI): void {
 	pi.registerCommand("ds4", {
 		description: "Show the live ds4-server log",
@@ -1256,9 +1324,9 @@ function ds4Model(id: string, name: string) {
 function registerDs4Provider(pi: ExtensionAPI): void {
 	pi.registerProvider(PROVIDER_ID, {
 		name: "ds4.c local",
-		baseUrl: API_BASE_URL,
-		api: "openai-completions",
-		apiKey: "dsv4-local",
+		baseUrl: PROVIDER_BASE_URL,
+		api: PROVIDER_API,
+		apiKey: configString("DS4_API_KEY", "dsv4-local"),
 		compat: {
 			supportsStore: false,
 			supportsDeveloperRole: false,
@@ -1268,6 +1336,7 @@ function registerDs4Provider(pi: ExtensionAPI): void {
 			supportsStrictMode: false,
 			thinkingFormat: "deepseek",
 			requiresReasoningContentOnAssistantMessages: true,
+			...(PROVIDER_API === "anthropic-messages" ? { supportsEagerToolInputStreaming: false } : {}),
 		},
 		models: [
 			ds4Model(MODEL_ID, "DeepSeek V4 Flash (ds4.c local)"),
@@ -1289,6 +1358,7 @@ export default function (pi: ExtensionAPI) {
 
 	registerDs4Provider(pi);
 	registerDs4Command(pi);
+	registerDs4Skill(pi);
 
 	pi.on("before_provider_request", async (_event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER_ID) return;
